@@ -1,93 +1,142 @@
-import { CSSProperties, useMemo, useState } from 'react';
+import { CSSProperties, useEffect, useMemo, useState } from 'react';
 import { Chess } from 'chess.js';
 import { Chessboard } from 'react-chessboard';
 import { Link } from 'react-router-dom';
 import { BOTS } from '../components/bots';
-import { evaluateMaterial, moveBadge, openingFromHistory } from '../components/chessUtils';
+import { evaluateMaterial, kingSquare, MoveReview, moveBadge, openingFromHistory } from '../components/chessUtils';
 
 type Side = 'white' | 'black' | 'random';
 type Mode = 'human' | 'ai';
 
-const TIMER_OPTIONS = [0, 60, 180, 300, 600];
+type MoveRecord = { move: string; review: MoveReview };
+
+type GameSnapshot = {
+  fen: string;
+  moveRecords: MoveRecord[];
+};
+
+const TIMER_OPTIONS = [0, 60, 180, 300, 600, 900];
+
+const initialSnapshot = (): GameSnapshot => ({ fen: new Chess().fen(), moveRecords: [] });
 
 export default function PlayPage() {
   const [game, setGame] = useState(new Chess());
-  const [history, setHistory] = useState<string[]>([]);
-  const [badges, setBadges] = useState<string[]>([]);
-  const [redoStack, setRedoStack] = useState<string[]>([]);
+  const [moveRecords, setMoveRecords] = useState<MoveRecord[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [possibleMoves, setPossibleMoves] = useState<string[]>([]);
   const [showSuggest, setShowSuggest] = useState(true);
   const [showAttack, setShowAttack] = useState(true);
   const [mode, setMode] = useState<Mode>('ai');
-  const [side, setSide] = useState<Side>('random');
+  const [side, setSide] = useState<Side>('white');
+  const [boardOrientation, setBoardOrientation] = useState<'white' | 'black'>('white');
   const [timer, setTimer] = useState(300);
   const [whiteTime, setWhiteTime] = useState(300);
   const [blackTime, setBlackTime] = useState(300);
   const [chat, setChat] = useState<string[]>(['Bot: Ready for a galactic game?']);
-  const [botReply, setBotReply] = useState('Good move. Keep pressure on the center.');
+  const [message, setMessage] = useState('');
+  const [historyStack, setHistoryStack] = useState<GameSnapshot[]>([initialSnapshot()]);
+  const [historyPointer, setHistoryPointer] = useState(0);
 
-  const boardOrientation = useMemo(() => {
-    if (side === 'random') return Math.random() > 0.5 ? 'white' : 'black';
-    return side;
-  }, [side]);
-
+  const history = useMemo(() => moveRecords.map((item) => item.move), [moveRecords]);
   const turn = game.turn() === 'w' ? 'White' : 'Black';
   const opening = openingFromHistory(history);
   const evaluation = evaluateMaterial(game);
 
-  const safeGameMutate = (modify: (gameCopy: Chess) => void) => {
-    const gameCopy = new Chess(game.fen());
-    modify(gameCopy);
-    setGame(gameCopy);
+  useEffect(() => {
+    if (side === 'random') {
+      setBoardOrientation(Math.random() > 0.5 ? 'white' : 'black');
+      return;
+    }
+    setBoardOrientation(side);
+  }, [side]);
+
+  useEffect(() => {
+    if (timer === 0 || game.isGameOver()) return;
+    const interval = window.setInterval(() => {
+      if (game.turn() === 'w') {
+        setWhiteTime((time) => Math.max(0, time - 1));
+      } else {
+        setBlackTime((time) => Math.max(0, time - 1));
+      }
+    }, 1000);
+
+    return () => window.clearInterval(interval);
+  }, [game, timer]);
+
+  useEffect(() => {
+    if (whiteTime === 0 && timer > 0 && !game.isGameOver()) {
+      setChat((prev) => [...prev, 'System: White flagged on time. 🧭']);
+    }
+  }, [whiteTime, timer, game]);
+
+  useEffect(() => {
+    if (blackTime === 0 && timer > 0 && !game.isGameOver()) {
+      setChat((prev) => [...prev, 'System: Black flagged on time. 🧭']);
+    }
+  }, [blackTime, timer, game]);
+
+  const pushSnapshot = (nextGame: Chess, nextMoves: MoveRecord[]) => {
+    const trimmed = historyStack.slice(0, historyPointer + 1);
+    setHistoryStack([...trimmed, { fen: nextGame.fen(), moveRecords: nextMoves }]);
+    setHistoryPointer(trimmed.length);
   };
 
-  const updateMoveState = (gameCopy: Chess) => {
-    const verbose = gameCopy.history({ verbose: true });
-    setHistory(gameCopy.history());
-    setBadges(verbose.map((m) => moveBadge(m)));
-    setRedoStack([]);
+  const runBotMove = (currentGame: Chess, currentMoves: MoveRecord[]) => {
+    if (mode !== 'ai' || currentGame.isGameOver()) return;
 
-    if (mode === 'ai' && gameCopy.turn() === (boardOrientation[0] as 'w' | 'b')) return;
-    if (mode === 'ai' && !gameCopy.isGameOver()) {
-      window.setTimeout(() => {
-        const current = new Chess(gameCopy.fen());
-        const moves = current.moves({ verbose: true });
-        const picked = moves[Math.floor(Math.random() * moves.length)];
-        current.move(picked);
-        setGame(current);
-        const aiVerbose = current.history({ verbose: true });
-        setHistory(current.history());
-        setBadges(aiVerbose.map((m) => moveBadge(m)));
-        setBotReply(`Bot: ${picked.san} played. Your move.`);
-      }, 350);
-    }
+    const userColor = boardOrientation === 'white' ? 'w' : 'b';
+    if (currentGame.turn() === userColor) return;
+
+    window.setTimeout(() => {
+      const next = new Chess(currentGame.fen());
+      const moves = next.moves({ verbose: true });
+      if (!moves.length) return;
+      const picked = moves[Math.floor(Math.random() * moves.length)];
+      next.move(picked);
+      const nextMoves = [...currentMoves, { move: picked.san, review: moveBadge(picked, currentMoves.length) }];
+      setGame(next);
+      setMoveRecords(nextMoves);
+      pushSnapshot(next, nextMoves);
+      setChat((prev) => [...prev, `Bot: ${picked.san} played. Your move.`]);
+    }, 350);
   };
 
   const makeMove = (from: string, to: string) => {
-    let ok = false;
-    safeGameMutate((g) => {
-      const move = g.move({ from, to, promotion: 'q' });
-      if (!move) return;
-      ok = true;
-      updateMoveState(g);
-    });
+    const next = new Chess(game.fen());
+    const move = next.move({ from, to, promotion: 'q' });
+    if (!move) return false;
+
+    const nextMoves = [...moveRecords, { move: move.san, review: moveBadge(move, moveRecords.length) }];
+    setGame(next);
+    setMoveRecords(nextMoves);
+    pushSnapshot(next, nextMoves);
     setSelected(null);
     setPossibleMoves([]);
-    return ok;
+    runBotMove(next, nextMoves);
+    return true;
   };
 
   const onSquareClick = (square: string) => {
+    const piece = game.get(square);
+    const turnColor = game.turn();
+
     if (selected) {
       if (!makeMove(selected, square)) {
-        setSelected(square);
-        setPossibleMoves(game.moves({ square: square as never, verbose: true }).map((m) => m.to));
+        if (piece && piece.color === turnColor) {
+          setSelected(square);
+          setPossibleMoves(game.moves({ square: square as never, verbose: true }).map((m) => m.to));
+        } else {
+          setSelected(null);
+          setPossibleMoves([]);
+        }
       }
       return;
     }
 
-    setSelected(square);
-    setPossibleMoves(game.moves({ square: square as never, verbose: true }).map((m) => m.to));
+    if (piece && piece.color === turnColor) {
+      setSelected(square);
+      setPossibleMoves(game.moves({ square: square as never, verbose: true }).map((m) => m.to));
+    }
   };
 
   const customSquareStyles: Record<string, CSSProperties> = {};
@@ -97,69 +146,82 @@ export default function PlayPage() {
     customSquareStyles[last.from] = { backgroundColor: 'rgba(255, 240, 120, 0.35)' };
     customSquareStyles[last.to] = { backgroundColor: 'rgba(255, 240, 120, 0.35)' };
   }
+
   if (game.isCheck()) {
-    const board = game.board();
-    for (let r = 0; r < 8; r += 1) {
-      for (let c = 0; c < 8; c += 1) {
-        const piece = board[r][c];
-        if (piece?.type === 'k' && piece.color === game.turn()) {
-          customSquareStyles[`${'abcdefgh'[c]}${8 - r}`] = { backgroundColor: 'rgba(255, 0, 0, 0.35)' };
-        }
-      }
-    }
+    const checkedKing = kingSquare(game, game.turn());
+    if (checkedKing) customSquareStyles[checkedKing] = { backgroundColor: 'rgba(255, 0, 0, 0.35)' };
   }
   for (const sq of possibleMoves) customSquareStyles[sq] = { backgroundColor: 'rgba(255, 240, 120, 0.35)' };
 
   const suggestionArrows: [string, string, string?][] = [];
-  if (showSuggest) suggestionArrows.push(['e2', 'e4', 'rgba(0,255,0,0.45)']);
+  if (showSuggest && possibleMoves[0]) suggestionArrows.push([selected ?? 'e2', possibleMoves[0], 'rgba(0,255,0,0.45)']);
   if (showAttack) suggestionArrows.push(['d1', 'h5', 'rgba(255,0,0,0.45)']);
 
   const newGame = () => {
     const fresh = new Chess();
     setGame(fresh);
-    setHistory([]);
-    setBadges([]);
-    setRedoStack([]);
+    setMoveRecords([]);
     setSelected(null);
     setPossibleMoves([]);
     setWhiteTime(timer || 0);
     setBlackTime(timer || 0);
+    setHistoryStack([{ fen: fresh.fen(), moveRecords: [] }]);
+    setHistoryPointer(0);
   };
 
   const undo = () => {
-    safeGameMutate((g) => {
-      const undone = g.undo();
-      if (!undone) return;
-      setRedoStack((prev) => [...prev, undone.san]);
-      setHistory(g.history());
-      setBadges(g.history({ verbose: true }).map((m) => moveBadge(m)));
-    });
+    if (historyPointer <= 0) return;
+    const nextPointer = historyPointer - 1;
+    const snapshot = historyStack[nextPointer];
+    setHistoryPointer(nextPointer);
+    setGame(new Chess(snapshot.fen));
+    setMoveRecords(snapshot.moveRecords);
+    setSelected(null);
+    setPossibleMoves([]);
   };
 
   const redo = () => {
-    const san = redoStack.at(-1);
-    if (!san) return;
-    safeGameMutate((g) => {
-      g.move(san);
-      setRedoStack((prev) => prev.slice(0, -1));
-      setHistory(g.history());
-      setBadges(g.history({ verbose: true }).map((m) => moveBadge(m)));
-    });
+    if (historyPointer >= historyStack.length - 1) return;
+    const nextPointer = historyPointer + 1;
+    const snapshot = historyStack[nextPointer];
+    setHistoryPointer(nextPointer);
+    setGame(new Chess(snapshot.fen));
+    setMoveRecords(snapshot.moveRecords);
+    setSelected(null);
+    setPossibleMoves([]);
   };
 
-  const resign = () => setChat((prev) => [...prev, 'System: Resignation accepted.']);
-  const hint = () => setChat((prev) => [...prev, 'Coach: Consider development and king safety.']);
-
-  const sendChat = (text: string) => {
-    if (!text.trim()) return;
-    setChat((prev) => [...prev, `You: ${text.trim()}`, botReply]);
+  const resign = () => {
+    setChat((prev) => [...prev, 'System: Resignation accepted.']);
   };
+
+  const hint = () => {
+    const suggestion = possibleMoves[0] ? `Coach: Candidate move is ${selected}-${possibleMoves[0]}.` : 'Coach: Improve center control and king safety.';
+    setChat((prev) => [...prev, suggestion]);
+  };
+
+  const sendChat = () => {
+    if (!message.trim()) return;
+    setChat((prev) => [...prev, `You: ${message.trim()}`, 'Bot: Nice idea — keep calculating forcing lines.']);
+    setMessage('');
+  };
+
+  const winnerKing = game.isCheckmate() ? kingSquare(game, game.turn() === 'w' ? 'b' : 'w') : null;
+  const loserKing = game.isCheckmate() ? kingSquare(game, game.turn()) : null;
+
+  if (winnerKing) customSquareStyles[winnerKing] = { backgroundColor: 'rgba(85, 187, 90, 0.45)' };
+  if (loserKing) customSquareStyles[loserKing] = { backgroundColor: 'rgba(229, 57, 53, 0.45)' };
+
+  const drawWhiteKing = game.isDraw() ? kingSquare(game, 'w') : null;
+  const drawBlackKing = game.isDraw() ? kingSquare(game, 'b') : null;
+  if (drawWhiteKing) customSquareStyles[drawWhiteKing] = { backgroundColor: 'rgba(160, 160, 160, 0.4)' };
+  if (drawBlackKing) customSquareStyles[drawBlackKing] = { backgroundColor: 'rgba(160, 160, 160, 0.4)' };
 
   return (
     <main className="page game-page">
       <header className="topbar card">
         <h1>SANBRO Chess Arena</h1>
-        <p>Opening/Trap: {opening}</p>
+        <p>Opening / Trap: {opening}</p>
         <p>Turn: {turn}</p>
         <Link to="/">Home</Link>
       </header>
@@ -200,7 +262,7 @@ export default function PlayPage() {
             <button onClick={undo}>Undo</button>
             <button onClick={redo}>Redo</button>
             <button onClick={newGame}>New Game</button>
-            <button onClick={() => setSide((s) => (s === 'white' ? 'black' : 'white'))}>Switch Sides</button>
+            <button onClick={() => setSide((s) => (s === 'white' ? 'black' : s === 'black' ? 'white' : 'random'))}>Switch Sides</button>
             <button onClick={resign}>Resign</button>
             <button onClick={hint}>Hint</button>
           </div>
@@ -216,14 +278,15 @@ export default function PlayPage() {
         </aside>
 
         <div className="card board-wrap">
-          <div className="eval-bar">
-            <div className="white" style={{ height: `${evaluation}%` }}>
+          <div className="eval-bar" aria-label="Evaluation Bar">
+            <div className="white" style={{ width: `${evaluation}%` }}>
               White {evaluation}%
             </div>
-            <div className="black" style={{ height: `${100 - evaluation}%` }}>
+            <div className="black" style={{ width: `${100 - evaluation}%` }}>
               Black {100 - evaluation}%
             </div>
           </div>
+
           <Chessboard
             id="SANBRO-board"
             position={game.fen()}
@@ -245,9 +308,9 @@ export default function PlayPage() {
           <div className="history">
             <h3>Move History + Analysis</h3>
             <ol>
-              {history.map((move, i) => (
-                <li key={`${move}-${i}`}>
-                  {i + 1}. {move} — {badges[i]}
+              {moveRecords.map((entry, i) => (
+                <li key={`${entry.move}-${i}`}>
+                  {i + 1}. {entry.move} — {entry.review.badge} {entry.review.label}
                 </li>
               ))}
             </ol>
@@ -263,7 +326,6 @@ export default function PlayPage() {
               </li>
             ))}
           </ul>
-          <p className="small">Reference bot architecture: eddmann.com. Embedded engines can be wired via worker endpoints.</p>
 
           <h3>Bot Chat / Coach</h3>
           <div className="chat">
@@ -271,17 +333,20 @@ export default function PlayPage() {
               <p key={`${entry}-${i}`}>{entry}</p>
             ))}
           </div>
-          <input
-            placeholder="Reply to bot..."
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                sendChat((e.target as HTMLInputElement).value);
-                (e.target as HTMLInputElement).value = '';
-              }
-            }}
-          />
 
-          <p className="small">Timers: W {whiteTime === 0 ? '∞' : whiteTime}s | B {blackTime === 0 ? '∞' : blackTime}s</p>
+          <div className="chat-entry">
+            <input
+              placeholder="Reply to bot..."
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') sendChat();
+              }}
+            />
+            <button onClick={sendChat}>Send</button>
+          </div>
+
+          <p className="small">Timers: W {whiteTime === 0 ? '∞' : `${whiteTime}s`} | B {blackTime === 0 ? '∞' : `${blackTime}s`}</p>
         </aside>
       </section>
     </main>
