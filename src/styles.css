@@ -1,0 +1,64 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, system-ui, sans-serif;
+  background: radial-gradient(circle at top, #193a70, #071226 60%);
+  color: #e7efff;
+}
+
+body { margin: 0; }
+.page { min-height: 100vh; padding: 1.2rem; }
+.card {
+  background: rgba(12, 24, 45, 0.82);
+  border: 1px solid rgba(156, 195, 255, 0.2);
+  border-radius: 12px;
+  padding: 1rem;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+}
+.home { display: grid; gap: 1rem; max-width: 1000px; margin: 0 auto; }
+.hero h1 { margin-top: 0; }
+.actions { display: flex; gap: 0.8rem; }
+.btn, button {
+  background: linear-gradient(180deg, #3f79d8, #2653a0);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  cursor: pointer;
+  text-decoration: none;
+}
+.btn-secondary { background: #173867; }
+.prose ul { margin: 0; padding-left: 1.2rem; }
+.auth { display: grid; place-items: center; }
+.auth-card { width: 360px; display: grid; gap: 0.7rem; }
+input, select {
+  background: #0d213f;
+  color: #e7efff;
+  border: 1px solid #3c65a4;
+  border-radius: 6px;
+  padding: 0.5rem;
+}
+.topbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.layout { display: grid; gap: 1rem; grid-template-columns: 260px 1fr 320px; margin-top: 1rem; }
+.controls { display: grid; gap: 0.6rem; align-content: start; }
+.button-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+.board-wrap { display: grid; gap: 0.8rem; justify-items: center; }
+.eval-bar {
+  width: 100%;
+  max-width: 520px;
+  height: 40px;
+  border: 1px solid #4f75b4;
+  border-radius: 999px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: row;
+}
+.eval-bar .white { background: #dce9ff; color: #111; display: grid; place-items: center; height: 100%; }
+.eval-bar .black { background: #121212; color: #fff; display: grid; place-items: center; height: 100%; }
+.history { width: 100%; max-width: 520px; max-height: 220px; overflow: auto; }
+.sidebar { display: grid; gap: 0.7rem; align-content: start; }
+.chat { max-height: 180px; overflow: auto; background: rgba(0,0,0,0.2); border-radius: 8px; padding: 0.5rem; }
+.small { opacity: 0.85; font-size: 0.88rem; }
+@media (max-width: 1150px) { .layout { grid-template-columns: 1fr; } }
+
+.chat-entry { display: flex; gap: 0.5rem; }
+.chat-entry button { white-space: nowrap; }
